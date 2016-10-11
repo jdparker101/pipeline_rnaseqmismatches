@@ -33,7 +33,7 @@ Command line options
 '''
 
 import sys
-from collection import defaultdict
+from collections import defaultdict
 
 from CGAT import Experiment as E
 from CGAT import GTF
@@ -53,9 +53,9 @@ def main(argv=None):
     parser = E.OptionParser(version="%prog version: $Id$",
                             usage=globals()["__doc__"])
 
-     parser.add_option("-b", "--bamfile", dest="bam", type="string",
+    parser.add_option("-b", "--bamfile", dest="bam", type="string",
                       help="BAM formated alignment file to test. Should have MD and NH tags set")
-     parser.add_option("-t", "--quality-threshold", dest="threshold", type="int",
+    parser.add_option("-t", "--quality-threshold", dest="threshold", type="int",
                        default=30,
                        help="minimum quality threshold for a mismatched base to count")
 
@@ -75,7 +75,7 @@ def main(argv=None):
         start = min(e.start for e in gene)
         end = max(e.end for e in gene)
 
-        reads = bamfile.fetch(contig=gene[0].contig, start, end)
+        reads = bamfile.fetch(gene[0].contig, start, end)
 
         gene_id = gene[0].gene_id
         mm_count = 0
@@ -93,27 +93,28 @@ def main(argv=None):
             if read.get_tag("NH") > 1:
                 continue
 
-            alignement = read.get_aligned_pairs(with_seq=True)
-            base_count += len(read.query_alignment_length)
+            alignment = read.get_aligned_pairs(matches_only=True, with_seq=True)
+            base_count += sum(1 for b in read.query_alignment_qualities
+                              if b >= options.threshold)
             if read.get_tag("NM") == 0:
                 continue
 
-            #mismatches
-            mismatches = [base for base in alignment 
-                          if base[2].islower() and 
+            # mismatches
+            mismatches = [base for base in alignment
+                          if base[2].islower() and
                           start <= base[1] < end]
-            
+
             qualities = read.query_qualities
             
-            hq_mm = sum(1 for base in mimatches if qualities[base[0]] > options.threshold)
+            hq_mm = sum(1 for base in mismatches
+                        if qualities[base[0]] >= options.threshold)
 
             for base in mismatches:
                 mm_bases[base[2]] += 1
 
             mm_count += hq_mm
-            skipped += len(mismatches) - mm_count
+            skipped += len(mismatches) - hq_mm
 
-        
         outline = "\t".join(map(str,[gene_id,
                                      mm_count,
                                      base_count,

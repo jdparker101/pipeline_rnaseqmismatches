@@ -106,6 +106,11 @@ PARAMS = P.getParameters(
      "../pipeline.ini",
      "pipeline.ini"])
 
+PARAMS["projectsrc"] = os.path.dirname(__file__)
+#for key, value in PARAMS.iteritems():
+#    print "%s:\t%s" % (key,value)
+
+
 # add configuration values from associated pipelines
 #
 # 1. pipeline_annotations: any parameters will be added with the
@@ -158,10 +163,10 @@ def connect():
 def dedup_bams(infile, outfile):
     '''Use MarkDuplicates to mark dupliceate reads'''
 
-    metrics = P.snip(outfile, "*.bam") + ".tsv")
-    statement = '''MarkDuplicates -I %(infile)s
-                                  -O %(outfile)s
-                                  -M %(metrics)s > %(outfile)s.log;
+    metrics = P.snip(outfile, ".bam") + ".tsv"
+    statement = '''MarkDuplicates I=%(infile)s
+                                  O=%(outfile)s
+                                  M=%(metrics)s > %(outfile)s.log;
 
                    checkpoint;
 
@@ -170,11 +175,12 @@ def dedup_bams(infile, outfile):
     job_memory = "4G"
     P.run()
 
+
+# ---------------------------------------------------
+@follows(mkdir("mismatches.dir"))
 @transform(dedup_bams,
            formatter(),
-           add_inputs(
-               os.path.join(PARAMS["annotations_dir"],
-                            PARAMS["annotations_geneset_all"])),
+           add_inputs("geneset_all.gtf.gz"),
            "mismatches.dir/{basename[0]}.tsv.gz")
 def count_mismatches(infiles, outfile):
     ''' Count mismatches per sequenced base, per read, discarding duplicated reads
@@ -182,7 +188,7 @@ def count_mismatches(infiles, outfile):
 
     bamfile, gtffile = infiles
     statement = '''python %(projectsrc)s/count_mismatches.py
-                                         -I %(gtfile)s
+                                         -I %(gtffile)s
                                          --bamfile=%(bamfile)s
                                          --quality-threshold=%(quality_threshold)s
                                          -S %(outfile)s
@@ -191,21 +197,21 @@ def count_mismatches(infiles, outfile):
     P.run()
 
 
+# ---------------------------------------------------
 @merge(count_mismatches,
-       "mismatch_counts.tsv.gz")
+       "mismatch_counts.load")
 def merge_mismatch_counts(infiles, outfile):
     '''Load the results of mismatch counting into the database'''
 
     P.concatenateAndLoad(infiles, outfile,
-                         regex_filename="mismatches.dir/(.+)-(.+)-(.+).tsv.gz",
-                         cat="tissue,condition,replicate",
-                         options="-i tissue -i condition -i replicate")
-
+                         regex_filename="mismatches.dir/(CB|FC)-(.+).tsv.gz",
+                         cat="tissue,replicate",
+                         options="-i tissue -i replicate -i gene_id")
 
 
 # ---------------------------------------------------
 # Generic pipeline tasks
-@follows(loadWordCounts)
+@follows(merge_mismatch_counts)
 def full():
     pass
 

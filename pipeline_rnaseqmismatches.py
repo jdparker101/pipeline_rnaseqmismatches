@@ -205,7 +205,7 @@ def merge_mismatch_counts(infiles, outfile):
     '''Load the results of mismatch counting into the database'''
 
     P.concatenateAndLoad(infiles, outfile,
-                         regex_filename="mismatches.dir/(CB|FC)-(.+).tsv.gz",
+                         regex_filename="mismatches.dir/(.+)-(.+)-(.+).tsv.gz",
                          cat="tissue,replicate",
                          options="-i tissue -i replicate -i gene_id")
 

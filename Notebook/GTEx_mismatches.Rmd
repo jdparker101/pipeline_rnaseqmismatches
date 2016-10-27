@@ -1,0 +1,131 @@
+---
+title: "GTEx mismatches inital analysis"
+output: html_notebook
+---
+
+Data base processed with pipeline_mapping and then pipeline_rnaseqmismatches. Briefly reads were mapped using HISAT, allowing upto 15mm to hg19 ensembl75.
+
+Duplicates were removed, and then the number of high quality mismatches bses was counted per high quality mapped base on a gene-by-gene basis. Here high quality means base quality over 30. 
+
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(broom)
+library("RSQLite")
+con = dbConnect(drv=SQLite(),
+                dbname="/shared/sudlab1/General/projects/GTEx_Mismatch_Project/mm_pipeline_test.db")
+mismatches <- dbGetQuery(con, "SELECT * FROM mismatch_counts")
+
+```
+
+
+First job is to filter out unsuitable genes. Lets take the least subtle approach - only keep genes where mismatches is above 10 and bases is above 1000 for all replicates
+
+```{r}
+mismatches %>% group_by(gene_id) %>% filter(all(mismatches > 10), all(bases>1000)) -> filtered_mismatches
+
+```
+
+Add the mismatch rate, and average per gene per tissue:
+
+```{r}
+filtered_mismatches$mm_rate <- filtered_mismatches$mismatches/filtered_mismatches$bases
+filtered_mismatches %>% group_by(gene_id, tissue) %>% summarise(ave_rate = mean(mm_rate), std = sd(mm_rate)) -> ave_rates
+```
+
+Now lets have a look at the plot
+
+```{r}
+library(ggplot2)
+ggplot(ave_rates, aes(tissue, ave_rate)) + geom_violin() + theme_bw() + scale_y_log10()
+```
+
+
+Looks to me like there isn't any difference, contrary to when we included low quality bases and duplicates. Lets compare with low quality:
+
+
+```{r}
+filtered_mismatches %>% mutate(lq_rate = low_qual/(low_qual + mismatches)) %>% group_by(gene_id, tissue) %>% summarise(ave_lq=mean(lq_rate)) %>% ggplot() + aes(tissue, ave_lq) + geom_violin() + scale_y_log10()
+```
+
+Lets find particular genes:
+
+```{r}
+filtered_mismatches %>% mutate(mm_rate=log2(mm_rate)) %>% group_by(gene_id) %>% do(tidy(t.test(mm_rate ~ tissue, data=.))) -> ttests
+```
+
+
+Now do the multiple testing correction:
+
+```{r}
+ttests$adj.p.val <- p.adjust(ttests$p.value, method="BH")
+table(ttests$adj.p.val < 0.05)
+```
+
+
+Are they more in CB, more in FC or balanced:
+
+```{r}
+table(subset(ttests, adj.p.val<0.05)$estimate >0)
+```
+
+Lets have a look at some examples
+```{r}
+subset(ttests,adj.p.val < 0.05)
+```
+
+Okay, lets try ENSG00000002549.
+
+```{r}
+filtered_mismatches %>% subset(gene_id=="ENSG00000002549") %>% ggplot() + aes(x=tissue, y=log2(mm_rate)) + geom_point() + theme_bw()
+```
+
+MA plot:
+
+```{r}
+ttests %>% ggplot() + aes(x=estimate1+estimate2, y=estimate, alpha=adj.p.val < 0.05, col=adj.p.val < 0.05) + geom_point() + scale_alpha_manual(values=c(0.1,1)) + scale_color_manual(values=c("black","red"))
+```
+
+Are the point normallaly distributed? 
+
+```{r}
+filtered_mismatches %>% mutate(mm_rate=log2(mm_rate)) %>% group_by(gene_id, tissue) %>% mutate(z=(mm_rate-mean(mm_rate))/sd(mm_rate)) %>% ggplot() + aes(z) + geom_histogram()
+```
+
+Hmmm.. ever so slightly right skew. What about the qqnorm plot
+
+```{r}
+qqnorm((filtered_mismatches %>% mutate(mm_rate=log2(mm_rate)) %>% group_by(gene_id, tissue) %>% mutate(z=(mm_rate-mean(mm_rate))/sd(mm_rate)))$z)
+abline(a=0, b=1)
+```
+
+Is there a relationship between change in expression and change in mismatch frequency?
+
+```{r}
+library(reshape2)
+filtered_mismatches %>% group_by(tissue, gene_id) %>% summarise(expr=mean(bases)) %>%  dcast(gene_id~tissue) %>% mutate(lfc = log2(CB/FC)) -> expr_lfc
+ave_rates %>% dcast(gene_id~tissue, value.var="ave_rate") %>% mutate(diff=log2(CB/FC)) %>% select(gene_id,diff) %>% inner_join(expr_lfc) %>% inner_join(ttests) %>% ggplot() + aes(x=lfc, y=diff, col = adj.p.val < 0.05) + geom_point() + stat_smooth()
+```
+
+```{r}
+filtered_mismatches %>% group_by(tissue, gene_id) %>% summarise(expr=mean(bases), ave_mm=mean(mm_rate)) %>%  ggplot() + aes(x=expr,y=ave_mm, col=tissue) + geom_point() + scale_x_log10() + scale_y_log10()
+```
+
+What about genes on the mitochondral chromosome, what do they look like
+
+```{r}
+library(org.Hs.eg.db)
+select(org.Hs.eg.db, keys=ttests$gene_id, keytype="ENSEMBL", columns="CHR") %>% mutate(gene_id=ENSEMBL) %>% dplyr::select(gene_id, CHR) %>% inner_join(ttests) -> ttests
+
+subset(ttests, CHR=="MT")
+```
+
+
+Okay, lets get that plotted out:
+
+```{r}
+mt_genes = subset(ttests, CHR=="MT")$gene_id
+filtered_mismatches %>% subset(gene_id %in% mt_genes) %>% group_by(gene_id)  %>% mutate(mm_rate=mm_rate/ median(mm_rate)) %>% ggplot(aes(gene_id, log2(mm_rate), fill=NULL, col=tissue)) + # geom_boxplot()
+  geom_point(position=position_jitterdodge(jitter.width = 0.3, dodge.width = 0.7))
+```

@@ -106,14 +106,14 @@ def main(argv=None):
 
             qualities = read.query_qualities
             
-            hq_mm = sum(1 for base in mismatches
+            hqual_mm = sum(1 for base in mismatches
                         if qualities[base[0]] >= options.threshold)
 
             for base in mismatches:
                 mm_bases[base[2]] += 1
 
-            mm_count += hq_mm
-            skipped += len(mismatches) - hq_mm
+            mm_count += hqual_mm
+            skipped += len(mismatches) - hqual_mm
 
         outline = "\t".join(map(str,[gene_id,
                                      mm_count,

@@ -185,12 +185,13 @@ def dedup_bams(infile, outfile):
 def count_mismatches(infiles, outfile):
     ''' Count mismatches per sequenced base, per read, discarding duplicated reads
     and low quality bases'''
-
     bamfile, gtffile = infiles
+    fastapath = os.path.join(PARAMS["genome_dir"],PARAMS["genome"])
     statement = '''python %(projectsrc)s/count_mismatches.py
                                          -I %(gtffile)s
                                          --bamfile=%(bamfile)s
                                          --quality-threshold=%(quality_threshold)s
+                                         --fasta-path=%(fastapath)s
                                          -S %(outfile)s
                                          -L %(outfile)s.log '''
 

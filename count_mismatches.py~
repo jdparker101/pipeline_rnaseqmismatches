@@ -204,7 +204,7 @@ def main(argv=None):
             readseq = read.query_alignment_sequence
 
 	    def _is_snp(base):
-		if len(snp_dict.keys()) > 0:
+		if snp_dict == {}:
                     if snp_dict.has_key(base[1]):
                         if readseq[base[0]] != snp.dict[base[1]]:
                              return True

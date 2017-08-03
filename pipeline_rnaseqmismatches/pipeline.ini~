@@ -34,7 +34,6 @@ quality_threshold=30
 fasta=/shared/sudlab1/General/mirror/genomes/plain/hg19
 
 #path to the indexed vcf file for the chosen datatset
-vcf=
 [database]
 name=
 ################################################################

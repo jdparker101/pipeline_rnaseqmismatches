@@ -99,6 +99,7 @@ import os
 import sqlite3
 import CGAT.Experiment as E
 import CGATPipelines.Pipeline as P
+import re
 
 # load options from the config file
 PARAMS = P.getParameters(
@@ -156,52 +157,191 @@ def connect():
 
 # ---------------------------------------------------
 # Specific pipeline tasks
-@follows(mkdir("deduped.dir"))
-@transform("*.bam",
-           formatter(),
-           r"deduped.dir/{basename[0]}.bam")
-def dedup_bams(infile, outfile):
-    '''Use MarkDuplicates to mark dupliceate reads'''
 
-    metrics = P.snip(outfile, ".bam") + ".tsv"
-    statement = '''MarkDuplicates I=%(infile)s
-                                  O=%(outfile)s
-                                  M=%(metrics)s > %(outfile)s.log;
-
-                   checkpoint;
-
-                   samtools index %(outfile)s'''
+@follows(mkdir("readgroups.dir"))
+@transform("*.bam",regex(r"(.+).bam"),r"readgroups.dir/\1.readgroups.bam")
+def add_read_groups(infile, outfile):
+    platform = PARAMS["platform"]
+    groupsample = PARAMS["groupsample"]
+    statement = '''java -jar /shared/sudlab1/General/apps/bio/picard-tools-1.135/picard.jar
+                   AddOrReplaceReadGroups
+                   I=%(infile)s
+                   O=%(outfile)s
+                   RGLB=lib1
+                   RGPL=%(platform)s
+                   RGPU=unit1
+                   RGSM=%(groupsample)s'''
 
     job_memory = "4G"
     P.run()
 
 
+
+@follows(mkdir("deduped.dir"))
+@transform(add_read_groups,
+           regex(r"readgroups.dir/(.+).readgroups.bam"),
+           r"deduped.dir/\1.bam")
+def dedup_bams(infile, outfile):
+    '''Use MarkDuplicates to mark dupliceate reads'''
+    tempfile=P.snip(outfile, ".bam") + ".temp.bam"   
+    metrics=P.snip(outfile, ".bam") + ".metrics.tsv"
+    statement = '''MarkDuplicates I=%(infile)s
+                                  O=%(tempfile)s
+                                  M=%(metrics)s > %(outfile)s.log;
+
+                    checkpoint;
+                                samtools view 
+                                -F 1024
+                                -b
+                                %(tempfile)s
+                                > %(outfile)s;
+                  
+                    checkpoint;
+                                rm -r %(tempfile)s
+
+                    checkpoint;
+
+                                samtools index %(outfile)s'''
+
+    job_memory = "8G"
+    P.run()
+
+@active_if(not(PARAMS['vcfavail']))
+@follows(mkdir("split.dir"))
+@transform(dedup_bams,regex(r"deduped.dir/(.+).bam"),r"split.dir/\1.split.bam")
+def splitbams(infile,outfile):
+    '''use GATK splitNcigar to split reads into exon segements'''
+    fasta = os.path.join(PARAMS["fasta"],PARAMS["genome"]) + ".fasta"
+    fastamap = PARAMS["mapfasta"]
+    drctry= PARAMS["tmpdir"]
+    statement = '''java -Xmx10G -Djava.io.tmpdir=%(drctry)s -jar ~/Downloads/GenomeAnalysisTK-3.8-0-ge9d806836/GenomeAnalysisTK.jar
+                   -T SplitNCigarReads 
+                   -R %(fastamap)s
+                   -I %(infile)s 
+                   -o %(outfile)s 
+                   -rf ReassignOneMappingQuality 
+                   -RMQF 255 
+                   -RMQT 60 
+                   -U ALLOW_N_CIGAR_READS'''
+
+    job_memory = "12G"
+    P.run()
+
+#@follows(mkdir("BaseRecalibration.dir"))
+#@transform(splitbams,regex(r"split.dir/(.+).split.bam"),r"BaseRecalibration.dir/\1.recal.bam")
+#def baserecal(infile,outfile):
+#    fasta = os.path.join(PARAMS["fasta"],PARAMS["genome"]) + ".fasta"
+#    fastamap = PARAMS["mapfasta"]
+#    drctry= PARAMS["tmpdir"]
+#    statement = '''java -Xmx10G -Djava.io.tmpdir=%(drctry)s -jar ~/Downloads/GenomeAnalysisTK-3.8-0-ge9d806836/GenomeAnalysisTK.jar 
+#                   -T BaseRecalibrator
+#                   -R %(fastamap)s
+#                   -I %(infile)s 
+#                   -o %(outfile)s
+#                   '''
+#  
+#    job_memory = "12G"
+#    P.run()               
+
+@follows(mkdir("Variantcalls.dir"))
+@transform(splitbams,regex(r"split.dir/(.+).split.bam"),r"Variantcalls.dir/\1.vcf.gz")
+def variantcalling(infile,outfile):
+    fasta = os.path.join(PARAMS["fasta"],PARAMS["genome"]) + ".fasta"
+    fastamap = PARAMS["mapfasta"]
+    drctry= PARAMS["tmpdir"]
+    tempfile=P.snip(outfile,".gz")
+    statement = '''java -Xmx10G -Djava.io.tmpdir=%(drctry)s -jar ~/Downloads/GenomeAnalysisTK-3.8-0-ge9d806836/GenomeAnalysisTK.jar 
+                   -T HaplotypeCaller
+                   -R %(fastamap)s 
+                   -I %(infile)s 
+                   -dontUseSoftClippedBases 
+                   -stand_call_conf 20.0 
+                   -o %(tempfile)s;
+                   checkpoint;
+                   bgzip %(tempfile)s;
+                   checkpoint;
+                   rm -r %(tempfile)s'''  
+
+    job_memory = "12G"
+    P.run()                 
+
+
+@transform(variantcalling,regex(r"(.+).vcf.gz"),r"\1.reheader.vcf.gz.tbi")
+def renamesample(infile,outfile):
+    renamefile=P.snip(infile,".vcf.gz")+".txt"
+    tempfile=P.snip(outfile,".tbi")
+    vcfpattern=PARAMS["vcfpattern"]
+    statement='''touch %(renamefile)s;
+                 checkpoint;
+                 echo $(echo %(infile)s | egrep -o %(vcfpattern)s) > %(renamefile)s;
+                 checkpoint;
+                 bcftools reheader -s %(renamefile)s %(infile)s > %(tempfile)s;
+                 checkpoint;
+                 tabix -p vcf %(tempfile)s'''
+
+    job_memory = "4G"
+    P.run()
+
+#add_inputs("geneset_all.gtf.gz")
 # ---------------------------------------------------
+@active_if(PARAMS['vcfavail'])
 @follows(mkdir("mismatches.dir"))
 @transform(dedup_bams,
            formatter(),
-           add_inputs("geneset_all.gtf.gz"),
            "mismatches.dir/{basename[0]}.tsv.gz")
-def count_mismatches(infiles, outfile):
+def count_mismatches(infile, outfile):
     ''' Count mismatches per sequenced base, per read, discarding duplicated reads
     and low quality bases'''
-    bamfile, gtffile = infiles
     fastapath = os.path.join(PARAMS["fasta"],PARAMS["genome"])
     vcfpath = PARAMS["vcf"]
+    gtfpath = PARAMS["gtf"]
+    sampat = PARAMS["samplepattern"]
+    samplepattern = '"%s"'%(sampat)
+    quality_threshold = PARAMS["quality_threshold"]
     statement = '''python %(projectsrc)s/count_mismatches.py
-                                         -I %(gtffile)s
-                                         --bamfile=%(bamfile)s
+                                         -I %(gtfpath)s
+                                         --bamfile=%(infile)s
                                          --quality-threshold=%(quality_threshold)s
                                          --fasta-path=%(fastapath)s
+                                         -d %(samplepattern)s
                                          --vcf-path=%(vcfpath)s
                                          -S %(outfile)s
-                                         -L %(outfile)s.log '''
+                                         -L %(outfile)s.log
+                                         -v5 '''
     job_memory="6G"
     P.run()
 
 
+@active_if(not(PARAMS['vcfavail']))
+@follows("renamesample")
+@follows(mkdir("mismatches.dir"))
+@transform(dedup_bams,
+           regex(r"deduped.dir/(.+).bam"),
+           r"mismatches.dir/\1.tsv.gz")
+def count_mismatches_with_VCF(infile, outfile):
+    ''' Count mismatches per sequenced base, per read, discarding duplicated reads
+    and low quality bases'''
+    fastapath = os.path.join(PARAMS["fasta"],PARAMS["genome"])
+    vcfname = re.search(r"deduped.dir/(.+).bam", infile, flags = 0).group(1) + ".reheader.vcf.gz"
+    vcfpath = "Variantcalls.dir/" + vcfname
+    gtfpath = PARAMS["gtf"]
+    sampat = PARAMS["samplepattern"]
+    samplepattern = '"%s"'%(sampat)
+    quality_threshold = PARAMS["quality_threshold"]
+    statement = '''python %(projectsrc)s/count_mismatches.py
+                                         -I %(gtfpath)s
+                                         --bamfile=%(infile)s
+                                         --quality-threshold=%(quality_threshold)s
+                                         --fasta-path=%(fastapath)s
+                                         --vcf-path=%(vcfpath)s
+                                         -d %(samplepattern)s
+                                         -S %(outfile)s
+                                         -L %(outfile)s.log
+                                         -v5'''
+    job_memory="6G"
+    P.run()
 # ---------------------------------------------------
-@merge(count_mismatches,
+@merge([count_mismatches,count_mismatches_with_VCF],
        "mismatch_counts.load")
 def merge_mismatch_counts(infiles, outfile):
     '''Load the results of mismatch counting into the database'''

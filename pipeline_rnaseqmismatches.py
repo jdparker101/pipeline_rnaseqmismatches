@@ -185,9 +185,11 @@ def dedup_bams(infile, outfile):
     '''Use MarkDuplicates to mark dupliceate reads'''
     tempfile=P.snip(outfile, ".bam") + ".temp.bam"   
     metrics=P.snip(outfile, ".bam") + ".metrics.tsv"
+    temporary = PARAMS["tmpdir"]
     statement = '''MarkDuplicates I=%(infile)s
                                   O=%(tempfile)s
-                                  M=%(metrics)s > %(outfile)s.log;
+                                  M=%(metrics)s
+                                  TMP_DIR=%(temporary)s > %(outfile)s.log;
 
                     checkpoint;
                                 samtools view 
@@ -203,7 +205,7 @@ def dedup_bams(infile, outfile):
 
                                 samtools index %(outfile)s'''
 
-    job_memory = "8G"
+    job_memory = "15G"
     P.run()
 
 @active_if(not(PARAMS['vcfavail']))
@@ -295,6 +297,7 @@ def count_mismatches(infile, outfile):
     fastapath = os.path.join(PARAMS["fasta"],PARAMS["genome"])
     vcfpath = PARAMS["vcf"]
     gtfpath = PARAMS["gtf"]
+    redipath = PARAMS["redipath"]
     sampat = PARAMS["samplepattern"]
     samplepattern = '"%s"'%(sampat)
     quality_threshold = PARAMS["quality_threshold"]
@@ -305,6 +308,7 @@ def count_mismatches(infile, outfile):
                                          --fasta-path=%(fastapath)s
                                          -d %(samplepattern)s
                                          --vcf-path=%(vcfpath)s
+                                         --REDI-path=%(redipath)s
                                          -S %(outfile)s
                                          -L %(outfile)s.log
                                          -v5 '''
@@ -325,6 +329,7 @@ def count_mismatches_with_VCF(infile, outfile):
     vcfname = re.search(r"deduped.dir/(.+).bam", infile, flags = 0).group(1) + ".reheader.vcf.gz"
     vcfpath = "Variantcalls.dir/" + vcfname
     gtfpath = PARAMS["gtf"]
+    redipath = PARAMS["redipath"]
     sampat = PARAMS["samplepattern"]
     samplepattern = '"%s"'%(sampat)
     quality_threshold = PARAMS["quality_threshold"]
@@ -334,6 +339,7 @@ def count_mismatches_with_VCF(infile, outfile):
                                          --quality-threshold=%(quality_threshold)s
                                          --fasta-path=%(fastapath)s
                                          --vcf-path=%(vcfpath)s
+                                         --REDI-path=%(redipath)s
                                          -d %(samplepattern)s
                                          -S %(outfile)s
                                          -L %(outfile)s.log

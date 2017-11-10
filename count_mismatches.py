@@ -38,6 +38,7 @@ from CGAT import Experiment as E
 from CGAT import GTF
 from CGAT import IOTools
 from CGAT.IndexedFasta import IndexedFasta
+import CGAT.Bed as Bed
 import textwrap
 import pysam
 import vcf
@@ -65,7 +66,9 @@ def main(argv=None):
     parser.add_option("-p", "--vcf-path", dest="vcfpath", type="string",
                        help="path to indexed vcf file for dataset  of choice")
     parser.add_option("-d", "--sample", dest="samppattern", type="string",
-                       help="pattern to match and extract the donor name from the bam file, for use in parsing the vcf file")       
+                       help="pattern to match and extract the donor name from the bam file, for use in parsing the vcf file") 
+    parser.add_option("-n", "--REDI-path", dest="redipath", type="string",
+                       help="path to Bed format REDIportal table containing RNA editing positions")      
     #parser.add_option("-p", "--vcf-available", dest="vcfavail", type="int",
                        #help="whether a vcf file is available for this set of data")
     #parser.add_option("-a", "--vcf-avail", dest="vcfavail", type="int",
@@ -76,6 +79,7 @@ def main(argv=None):
     bamfile = pysam.AlignmentFile(options.bam)
     fastafile = IndexedFasta(options.fastapath)
     vcffile = vcf.Reader(open(options.vcfpath,"r"))
+    BEDREDI = Bed.readAndIndex(IOTools.openFile(options.redipath), with_values=True)
     options.stdout.write("\t".join(["gene_id",
                                     "mismatches",
                                     "bases",
@@ -84,7 +88,8 @@ def main(argv=None):
                                     "a_to_t","a_to_g","a_to_c",
                                     "t_to_a","t_to_g","t_to_c",
                                     "g_to_a","g_to_t","g_to_c",
-                                    "c_to_a","c_to_t","c_to_g"]) + "\n")
+                                    "c_to_a","c_to_t","c_to_g",
+                                    "indel_count","RNA_editing_events"]) + "\n")
     
     samplepattern = options.samppattern
     #samplepattern = samplepattern.replace('"','')
@@ -133,6 +138,8 @@ def main(argv=None):
         mm_count = 0
         base_count = 0
         skipped = 0
+        indel_count = 0
+        RNA_edits = 0
         matched_bases = defaultdict(int)
         transition = {"a_to_t":0,"a_to_g":0,"a_to_c":0,"t_to_a":0,"t_to_g":0,
         "t_to_c":0,"g_to_a":0,"g_to_t":0,"g_to_c":0,"c_to_a":0,"c_to_t":0,
@@ -155,6 +162,10 @@ def main(argv=None):
             if read.get_tag("NH") > 1:
                 continue
             qualities = read.query_qualities
+
+            alignmentcigar = read.cigarstring
+
+            indel_count += (alignmentcigar.count("I") + alignmentcigar.count("D"))
 
             alignment = read.get_aligned_pairs(with_seq=True)
 
@@ -266,6 +277,133 @@ def main(argv=None):
                 else:
                     return True
 
+            def _is_indel(base):
+                if (len(readseq) >= (base[0] + 5)):
+                    if (len(seq) < (((base[1])-start) + 5)):
+                        upperrange = len(seq)-(base[1]-start)
+                        lowerrange = 5 - upperrange                                            
+                        readindelwindow=readseq[(base[0] - lowerrange):(base[0] + upperrange)]
+                        seqindelwindow=seq[(((base[1])-start) - lowerrange):(((base[1])-start)+ upperrange)]                
+                        matchwindows=[]
+                        for i in range(len(readindelwindow)):
+                            try:
+                                matchwindows.append((readindelwindow[i].lower()==seqindelwindow[i].lower()))
+                            except IndexError:
+                                print i
+                                print readindelwindow
+                                print seqindelwindow
+                                print start
+                                print lowerrange
+                                print upperrange
+                                print base[0]
+                                print (base[0] - lowerrange)
+                                print (base[0] + upperrange)
+                                print base[1]
+                                print (base[1] - start)
+                                print ((((base[1])-start) - lowerrange)-1)
+                                print ((((base[1])-start) + upperrange)-1)
+                                print readseq
+                                print seq
+                                print gene_id
+                                print gene[0].contig                            
+                                raise
+                    elif (len(seq) >= (((base[1])-start) + 5)):
+                        readindelwindow=readseq[base[0]:(base[0] + 5)]
+                        seqindelwindow=seq[((base[1])-start):(((base[1])-start)+5)]
+                        matchwindows=[]
+                        for i in range(len(readindelwindow)):
+                            try: 
+                                matchwindows.append(readindelwindow[i].lower()==seqindelwindow[i].lower())
+                            except IndexError:
+                                print i
+                                print readindelwindow
+                                print seqindelwindow
+                                print start
+                                print base[0]
+                                print base[1]
+                                print (base[1] - start) - 1
+                                print ((base[1] - start) + 5) - 1
+                                print readseq
+                                print seq
+                                print gene_id
+                                print gene[0].contig
+                                raise
+                    if matchwindows.count(False) >= 4:
+                        return False
+                    else:
+                        return True
+                elif (len(readseq) < (base[0] + 5)):
+                    if len(seq) < (((base[1])-start) + 5):
+                        readsequpperrange = len(readseq)-base[0]
+                        readseqlowerrange = 5 - readsequpperrange
+                        sequpperrange = len(seq) - (base[1] - start)
+                        seqlowerrange = 5 - sequpperrange
+                        if readsequpperrange < sequpperrange:
+                            upperrange = readsequpperrange
+                            lowerrange = readseqlowerrange
+                        elif sequpperrange < readsequpperrange:
+                            upperrange = sequpperrange
+                            lowerrange = seqlowerrange
+                        elif sequpperrange == readsequpperrange:
+                            upperrange = sequpperrange
+                            lowerrange = seqlowerrange                        
+                    elif ((base[1] - start) - 4) < 0:
+                        return True
+                    else:
+                        upperrange = len(readseq)-base[0]
+                        lowerrange = 5 - upperrange
+                    readindelwindow=readseq[(base[0] - lowerrange):(base[0] + upperrange)]
+                    seqindelwindow=seq[(((base[1])-start) - lowerrange):(((base[1])-start)+ upperrange)]                
+                    matchwindows=[]
+                    for i in range(len(readindelwindow)):
+                        try:
+                            matchwindows.append((readindelwindow[i].lower()==seqindelwindow[i].lower()))
+                        except IndexError:
+                            print i
+                            print readindelwindow
+                            print seqindelwindow
+                            print start
+                            print lowerrange
+                            print upperrange
+                            print base[0]
+                            print (base[0] - lowerrange)
+                            print (base[0] + upperrange)
+                            print base[1]
+                            print (base[1] - start)
+                            print ((((base[1])-start) - lowerrange))
+                            print ((((base[1])-start) + upperrange))
+                            print readseq
+                            print seq
+                            print gene_id
+                            print gene[0].contig
+                            
+                            raise
+                    if matchwindows.count(False) >= 4:
+                        return False
+                    else:
+                        return True
+
+            def _is_RNA_edit(base):
+                BEDREDIregion = BEDREDI[gene[0].contig].find(base[1],base[1]+1)
+                if len(list(BEDREDIregion)) == 0:
+                    return True
+                else:
+                    try:
+                        BEDREDIregion = BEDREDI[gene[0].contig].find(base[1],base[1]+1)
+                        for editpos in BEDREDIregion:
+                            if base[1] in editpos:
+                                if base[2] == editpos[2].fields[0] and readseq[base[0]].lower() == (editpos[2].fields[1]).lower:
+                                    RNA_edits += 1
+                                    return False
+                                else:
+                                    continue
+                            else:
+                                continue
+                    except KeyError:
+                        print base[1]
+                        print contig
+                        print gene[0].contig
+                    return True
 
             mismatches = [base for base in alignment
                           if base[2].islower() and
@@ -273,6 +411,8 @@ def main(argv=None):
 		          qualities[base[0]] >= options.threshold and
                           base[2].lower() != "n" and 
                           _is_snp(base) and
+                          _is_indel(base) and
+                          _is_RNA_edit(base) and
                           readseq[base[0]].lower() != "n"]
 
             
@@ -324,7 +464,9 @@ def main(argv=None):
                                      transition['g_to_c'],
                                      transition['c_to_a'],
                                      transition['c_to_t'],
-                                     transition['c_to_g']]))
+                                     transition['c_to_g'],
+                                     indel_count,
+                                     RNA_edits]))
         options.stdout.write(outline + "\n")
 
     # write footer and output benchmark information.

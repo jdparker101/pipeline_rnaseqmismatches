@@ -261,8 +261,7 @@ def variantcalling(infile,outfile):
                    -o %(tempfile)s;
                    checkpoint;
                    bgzip %(tempfile)s;
-                   checkpoint;
-                   rm -r %(tempfile)s'''  
+                   '''  
 
     job_memory = "12G"
     P.run()                 
@@ -289,8 +288,8 @@ def renamesample(infile,outfile):
 @active_if(PARAMS['vcfavail'])
 @follows(mkdir("mismatches.dir"))
 @transform(dedup_bams,
-           formatter(),
-           "mismatches.dir/{basename[0]}.tsv.gz")
+           regex(r"deduped.dir/(.+).bam"),
+           r"mismatches.dir/\1.tsv.gz")
 def count_mismatches(infile, outfile):
     ''' Count mismatches per sequenced base, per read, discarding duplicated reads
     and low quality bases'''
@@ -314,7 +313,9 @@ def count_mismatches(infile, outfile):
                                          -v5 '''
     job_memory="6G"
     P.run()
-
+#@transform(dedup_bams,
+#           formatter(),
+#           "mismatches.dir/{basename[0]}.tsv.gz")
 
 @active_if(not(PARAMS['vcfavail']))
 @follows("renamesample")
@@ -344,7 +345,7 @@ def count_mismatches_with_VCF(infile, outfile):
                                          -S %(outfile)s
                                          -L %(outfile)s.log
                                          -v5'''
-    job_memory="6G"
+    job_memory="8G"
     P.run()
 # ---------------------------------------------------
 @merge([count_mismatches,count_mismatches_with_VCF],

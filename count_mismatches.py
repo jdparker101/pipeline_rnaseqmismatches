@@ -98,10 +98,13 @@ def main(argv=None):
     #filed.close
     donorfrombam = re.search(r"%s"%(samplepattern),options.bam,flags=0).group(1)
 
+    reversecomplement = {"a":"t","t":"a","c":"g","g":"c"}
+
     for gene in GTF.flat_gene_iterator(GTF.iterator(options.stdin)):
 
         start = min(e.start for e in gene)
         end = max(e.end for e in gene)  
+        strand = gene[0].strand
 
         seq = fastafile.getSequence(gene[0].contig, "+", start, end)
         thischr = gene[0].contig.replace("chr","")
@@ -117,10 +120,9 @@ def main(argv=None):
             contig = gene[0].contig
         #filed = open("test.txt","w")
         #filed.write("%s\n"%(contig))
-        #filed.close       
-        
-        vcfregion = vcffile.fetch(contig,start,end)
-        
+        #filed.close
+        vcfregion = vcffile.fetch(contig,start,end)        
+
         donors=[]
         regionchecker=[]
         for regionsnp in vcfregion:
@@ -133,7 +135,12 @@ def main(argv=None):
                     if (donorfrombam in samp) == True:
                         donorid = samp
     
-                         
+        BEDREDIregion = BEDREDI[gene[0].contig].find(start,end+1)
+ 
+        editpositions = {edit_pos:edit_pos_field for
+                         edit_pos,edit_pos_plus,edit_pos_field
+                         in BEDREDIregion if edit_pos_field.fields[2] == strand}
+              
         gene_id = gene[0].gene_id
         mm_count = 0
         base_count = 0
@@ -268,10 +275,16 @@ def main(argv=None):
 	    def _is_snp(base):
 		if len(snp_dict.keys()) > 0:
                     if snp_dict.has_key(base[1]):
-                        if readseq[base[0]] != snp.dict[base[1]]:
-                             return True
+                        if strand == "-":
+                            if reversecomplement[readseq[base[0]]] != reversecomplement[snp.dict[base[1]]]:
+                                return True
+                            else:
+                                return False
                         else:
-                             return False
+                            if readseq[base[0]] != snp.dict[base[1]]:
+                                return True
+                            else:
+                                return False                            
                     else:
                         return True
                 else:
@@ -383,27 +396,75 @@ def main(argv=None):
                     else:
                         return True
 
-            def _is_RNA_edit(base):
-                BEDREDIregion = BEDREDI[gene[0].contig].find(base[1],base[1]+1)
-                if len(list(BEDREDIregion)) == 0:
+
+            def _is_RNA_edit(base,editpositions):
+                if base[2].lower() == "n" or readseq[base[0]].lower() == "n" or editpositions == {}:
                     return True
                 else:
-                    try:
-                        BEDREDIregion = BEDREDI[gene[0].contig].find(base[1],base[1]+1)
-                        for editpos in BEDREDIregion:
-                            if base[1] in editpos:
-                                if base[2] == editpos[2].fields[0] and readseq[base[0]].lower() == (editpos[2].fields[1]).lower:
-                                    RNA_edits += 1
-                                    return False
-                                else:
-                                    continue
-                            else:
-                                continue
-                    except KeyError:
-                        print base[1]
-                        print contig
-                        print gene[0].contig
-                    return True
+                    if base[1] in editpositions.keys():
+                        if base[2].lower() == editpositions[base[1]].fields[0].lower() and readseq[base[0]].lower() == editpositions[base[1]].fields[1].lower():
+                            return False
+                        else:
+                            return True
+                    else:
+                        True   
+             
+#            def _is_RNA_edit(base,strand):
+#                if base[2].lower() == "n" or readseq[base[0]].lower() == "n":
+#                    return True
+#                BEDREDIregion = BEDREDI[gene[0].contig].find(base[1],base[1]+1)
+#                if len(list(BEDREDIregion)) == 0:
+#                    return True
+#                else:
+#                    BEDREDIregion = BEDREDI[gene[0].contig].find(base[1],base[1]+1)
+#                    for editpos in BEDREDIregion:                     
+#                        if base[1] in editpos and strand == editpos[2].fields[2]:
+#                                if base[2].lower() == (editpos[2].fields[0]).lower() and readseq[base[0]].lower() == (editpos[2].fields[1]).lower():
+#                                    return False
+#                                else:
+#                                    continue
+#                        else:
+#                            continue
+
+
+#            def _is_RNA_edit(base,strand):
+#                if base[2].lower() == "n" or readseq[base[0]].lower() == "n":
+#                    return True
+#                BEDREDIregion = BEDREDI[gene[0].contig].find(base[1],base[1]+1)
+#                if len(list(BEDREDIregion)) == 0:
+#                    return True
+#                else:
+#                    BEDREDIregion = BEDREDI[gene[0].contig].find(base[1],base[1]+1)
+#                    for editpos in BEDREDIregion:                     
+#                        if base[1] in editpos:
+#                           
+#                                if reversecomplement[base[2].lower()] == (editpos[2].fields[0]).lower() and reversecomplement[readseq[base[0]].lower()] == (editpos[2].fields[1]).lower():
+#                                    return False
+#                                else:
+#                                    continue                                
+#                            else:
+#                                if base[2].lower() == (editpos[2].fields[0]).lower() and readseq[base[0]].lower() == (editpos[2].fields[1]).lower():
+#                                    return False
+#                                else:
+#                                    continue
+#                        else:
+#                            continue
+                    #except KeyError:
+                    #    print base[1]
+                    #    print editpos[2].start
+                    #    print editpos[2].end
+                    #    print contig
+                    #    print gene[0].contig
+                    #    print base[2].lower()
+                    #    print (editpos[2].fields[0]).lower()
+                    #    print readseq[base[0]].lower()
+                    #    print (editpos[2].fields[1]).lower()
+                    #    raise
+                    #return True
+
+            for base in total_alignment:
+                if _is_RNA_edit(base,editpositions) == False:
+                    RNA_edits += 1
 
             mismatches = [base for base in alignment
                           if base[2].islower() and
@@ -412,7 +473,7 @@ def main(argv=None):
                           base[2].lower() != "n" and 
                           _is_snp(base) and
                           _is_indel(base) and
-                          _is_RNA_edit(base) and
+                          _is_RNA_edit(base,editpositions) and
                           readseq[base[0]].lower() != "n"]
 
             
@@ -432,7 +493,12 @@ def main(argv=None):
                 genomebase = base[2].lower()
                 readbase = readseq[base[0]].lower()
                 try:
-                    transition["%s_to_%s"%(genomebase, readbase)] += 1
+                    if strand == "-":
+                        revgenomebase = reversecomplement[genomebase]
+                        revreadbase = reversecomplement[readbase]
+                        transition["%s_to_%s"%(revgenomebase, revreadbase)] += 1
+                    else:
+                        transition["%s_to_%s"%(genomebase, readbase)] += 1
                 except KeyError:
                     print transition
                     print read.query_alignment_sequence.upper() 

@@ -87,6 +87,7 @@ def main(argv=None):
     vcffile = vcf.Reader(open(options.vcfpath,"r"))
     BEDREDI = Bed.readAndIndex(IOTools.openFile(options.redipath), with_values=True)
     options.stdout.write("\t".join(["gene_id",
+                                    "strand",
                                     "mismatches",
                                     "bases",
                                     "low_qual",
@@ -399,14 +400,11 @@ def main(argv=None):
                         revgenomebase = reversecomplement[genomebase]
                         revreadbase = reversecomplement[readbase]
                         if revgenomebase == "g" and revreadbase == "a":
-                            #print "base is", base
-                            #print "read is reverse =", read.is_reverse
-                            #print read.tostring(bamfile)
                             if read.is_reverse:
                                 reverse_g_to_t += 1
                             else:
                                 not_reverse_g_to_t +=1
-                        transition["%s_to_%s"%(genomebase, readbase)] += 1
+                        transition["%s_to_%s"%(revgenomebase, revreadbase)] += 1
                     else:
                         transition["%s_to_%s"%(genomebase, readbase)] += 1
                 except KeyError:

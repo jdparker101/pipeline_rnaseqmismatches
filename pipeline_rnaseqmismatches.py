@@ -199,7 +199,7 @@ def dedup_bams(infile, outfile):
                                 > %(outfile)s;
                   
                     checkpoint;
-                                rm -r %(tempfile)s
+                                rm -r %(tempfile)s;
 
                     checkpoint;
 
@@ -223,7 +223,7 @@ def splitbams(infile,outfile):
                    -o %(outfile)s 
                    -rf ReassignOneMappingQuality 
                    -RMQF 255 
-                   -RMQT 60 
+                   -RMQT 60
                    -U ALLOW_N_CIGAR_READS'''
 
     job_memory = "12G"
@@ -276,13 +276,22 @@ def renamesample(infile,outfile):
                  checkpoint;
                  echo $(echo %(infile)s | egrep -o %(vcfpattern)s) > %(renamefile)s;
                  checkpoint;
-                 bcftools reheader -s %(renamefile)s %(infile)s > %(tempfile)s;
+                 bcftools reheader -s %(renamefile)s %(infile)s > %(tempfile)s
                  checkpoint;
                  tabix -p vcf %(tempfile)s'''
-
     job_memory = "4G"
     P.run()
 
+#@active_if(not(PARAMS['vcfavail']))
+#@transform(renamesample,regex(r"(.+).reheader.vcf.gz"),r"\1.vcfRNAeditfilter.txt")
+#def filtervcfs(infile,outfile):
+#    statement='''
+#    python %(projectsrc)s/VCF_RNA_edit_filter.py
+#    --vcf-path=%(infile)s
+#    -S %(outfile)s'''
+#    job_memory = "4G"
+#    P.run()
+    
 #add_inputs("geneset_all.gtf.gz")
 # ---------------------------------------------------
 @active_if(PARAMS['vcfavail'])
@@ -297,7 +306,7 @@ def count_mismatches(infile, outfile):
     vcfpath = PARAMS["vcf"]
     gtfpath = PARAMS["gtf"]
     redipath = PARAMS["redipath"]
-    sampat = PARAMS["samplepattern"]
+    sampat = "deduped.dir/" + PARAMS["samplepattern"]
     samplepattern = '"%s"'%(sampat)
     quality_threshold = PARAMS["quality_threshold"]
     statement = '''python %(projectsrc)s/count_mismatches.py
@@ -313,6 +322,7 @@ def count_mismatches(infile, outfile):
                                          -v5 '''
     job_memory="6G"
     P.run()
+
 #@transform(dedup_bams,
 #           formatter(),
 #           "mismatches.dir/{basename[0]}.tsv.gz")
@@ -331,7 +341,7 @@ def count_mismatches_with_VCF(infile, outfile):
     vcfpath = "Variantcalls.dir/" + vcfname
     gtfpath = PARAMS["gtf"]
     redipath = PARAMS["redipath"]
-    sampat = PARAMS["samplepattern"]
+    sampat = "deduped.dir/" + PARAMS["samplepattern"]
     samplepattern = '"%s"'%(sampat)
     quality_threshold = PARAMS["quality_threshold"]
     statement = '''python %(projectsrc)s/count_mismatches.py
@@ -347,6 +357,7 @@ def count_mismatches_with_VCF(infile, outfile):
                                          -v5'''
     job_memory="8G"
     P.run()
+
 # ---------------------------------------------------
 @merge([count_mismatches,count_mismatches_with_VCF],
        "mismatch_counts.load")

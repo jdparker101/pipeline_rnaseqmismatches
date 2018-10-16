@@ -74,11 +74,7 @@ def main(argv=None):
                        help="pattern to match and extract the donor name from the bam file, for use in parsing the vcf file") 
     parser.add_option("-n", "--REDI-path", dest="redipath", type="string",
                        help="path to Bed format REDIportal table containing RNA editing positions")      
-    #parser.add_option("-p", "--vcf-available", dest="vcfavail", type="int",
-                       #help="whether a vcf file is available for this set of data")
-    #parser.add_option("-a", "--vcf-avail", dest="vcfavail", type="int",
-                       #help="integer indicating whether the VCF file provided was created by variant calling during the pipline (0) or VCF was already present (1)")
-    # add common options (-h/--help, ...) and parse command line
+
     (options, args) = E.Start(parser, argv=argv)
 
     
@@ -102,7 +98,7 @@ def main(argv=None):
     (not_reverse_g_to_t, reverse_g_to_t) = 0, 0
     donorfrombam = re.search(r"%s"%(samplepattern),options.bam,flags=0).group(1)
 
-    # find the donarid:
+    # find the donorid:
     vcf_record = vcffile.next()
     samples = vcf_record.samples
     donors = [dnr.sample for dnr in samples]
@@ -177,12 +173,12 @@ def main(argv=None):
             alignment = read.get_aligned_pairs(with_seq=True)
 
             # list[:] is weird syntax for copying the list
-            testalignment = alignment[:]
             
             alignment = [base for base in alignment 
-                         if not base[0] is None and not base[1] is None]
+                         if not base[0] is None 
+                         and not base[1] is None]
 
-           
+            testalignment = alignment[:]           
 #            base_count += sum(1 for base in alignment
 #                          if start <= base[1] < end and
 #                          base[2].lower() != "n")
@@ -197,6 +193,11 @@ def main(argv=None):
                 if seq[(base[1])-start].lower() != base[2].lower():
                     if (testalignment[0][1] is None) or (testalignment[-1][1] is None):
                         E.debug("first or last base of read is None")
+                        E.debug("read sequence is %s" %(testalignment))
+                        E.debug("position of first base in genome: %s" %testalignment[0][1])
+                        E.debug("position of last base in genome: %s" %testalignment[-1][1])
+                        E.debug("identity of first base in genome: %s" %testalignment[0][2])
+                        E.debug("identity of last base in genome: %s" %testalignment[-1][2])
                         raise ValueError
                     else:    
                         E.debug("identity of error causing base from read sequence: %s" %(read.query_alignment_sequence)[base[0]].lower())
@@ -211,18 +212,21 @@ def main(argv=None):
                         E.debug("position of base in genome: %s" %base[1])
                         E.debug("position of base in read as calculated from position of base in genome and and start from gtf: %s" %(base[1]-start))                      
                         E.debug("identity of error causing base (reference), calculated from fasta and testalignment info: %s" %(seq[(testalignment[0][1]-start):(testalignment[-1][1]-start)].upper()[base[0]]))
-                        E.debug("position of base in read from first alignment genome base minus start plus position of base in in read, should equal position of base in read: %s" %((testalignment[0][1]-start) + base[0]))
+                        #E.debug("position of base in read from first alignment genome base minus start plus position of base in in read, should equal position of base in read: %s" %((testalignment[0][1]-start) + base[0]))
                         E.debug("identity of error causing base (reference), calculated from fasta and position of base in genome from aligned pairs: %s" %(seq[(base[1])-start]))
-                        E.debug("position of start base in genome from the alignment minus position of start base in genome from the gtf, should be zero: %s" %(alignment[0][1]-start))
+                        #E.debug("position of start base in genome from the alignment minus position of start base in genome from the gtf, should be zero: %s" %(alignment[0][1]-start))
                         E.debug("complete aligned pairs, unfiltered: %s" %(testalignment))
                         E.debug("full fasta sequence of read: %s" %(textwrap.fill(seq,50)))
                         raise ValueError
                            
                 else:
                     matched_bases[base[2].lower()] += 1
-            if read.get_tag("NM") == 0:
-                continue
-         
+            try:
+                if read.get_tag("NM") == 0:
+                    continue
+            except KeyError:
+                if read.get_tag("nM") == 0:
+                    continue
             # mismatches
             
 

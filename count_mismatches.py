@@ -128,7 +128,12 @@ def main(argv=None):
                 contig = contig + "T"
         else:
             contig = gene[0].contig
-        vcfregion = vcffile.fetch(contig,start,end)        
+       
+        try:
+            vcfregion = vcffile.fetch(contig,start,end)
+        except ValueError:
+            vcfregion = []
+                    
 
         regionchecker=list(vcfregion)
                 
@@ -155,7 +160,6 @@ def main(argv=None):
                 snp_dict[snp.POS -1] = snp.ALT
             
         for read in reads:
-
             if read.is_unmapped:
                 continue
             if read.is_duplicate:
